@@ -16,11 +16,11 @@ Policy iteration.
 
 import matplotlib.pyplot as plt
 import numpy as np
-import logging
+import pandas as pd
 
 MAX_NR_CARS = 20
 ACTION_SPACE = range(-5, 6)
-MAX_EPOCHS = 5
+MAX_EPOCHS = 10
 
 class CarRentalEnv():
     def __init__(self,
@@ -30,18 +30,7 @@ class CarRentalEnv():
                  move_reward=-2,
                  initial_state=(10, 10),
                  env_request_lam=(3, 4),
-                 env_return_lam=(3, 2),
-                 verbose=0):
-        logger = logging.getLogger("Jack's Car Rental Env")
-        ch = logging.StreamHandler()
-        logger.handlers = []
-        logger.addHandler(ch)
-        logger.setLevel(logging.WARNING)
-        if verbose > 0:
-            logger.setLevel(logging.INFO)
-            if verbose > 1:
-                logger.setLevel(logging.DEBUG)
-        self.logger = logger
+                 env_return_lam=(3, 2)):
         self.action_space = action_space
         self.max_nr_cars = max_nr_cars
         self.rent_reward = rent_reward
@@ -49,8 +38,18 @@ class CarRentalEnv():
         self.state = np.array(initial_state)
         self.env_request_lam = env_request_lam
         self.env_return_lam = env_return_lam
-        self.logger.info("Initialised Jack's Car Rental Env with params:\n{}".
-                         format(vars(self)))
+        self.step_nr = 0
+        columns = ['Open State',
+                   'Requests',
+                   'Rented', 
+                   'Returns',
+                   'Close State',
+                   'Action',
+                   'Movement',
+                   'Reward']
+        self.history = pd.DataFrame(columns=columns)
+        self.history.loc[self.step_nr, 'Open State'] = self.state
+        
     
     def step(self, action):
         """
@@ -58,43 +57,60 @@ class CarRentalEnv():
         2. Calculate reward for sucessful hire
         3. Sample nr cars returned
         4. Perform action
+            * If a movement is requested that is larger than the number of cars
+            available, only the number available are moved. Otherwise, moving
+            a large number of cars from one depo to another would be a way
+            of creating 5 new cars from nowhere each round. The agent is still
+            penalised for what it tried to move.
         """
-        reward = 0
         assert action in self.action_space, \
             "Your requested action [{}] is not in the action space [{}]".\
                 format(action, self.action_space)
+        self.step_nr += 1
+        self.history.loc[self.step_nr, 'Open State'] = self.state
         requests = np.array(
                 [np.random.poisson(lam=lam) for lam in self.env_request_lam])
         new_state = np.maximum(self.state - requests, np.zeros_like(requests))
         rented = self.state - new_state
-        self.logger.info("Requests: {}".format(requests))
-        self.logger.info("Fulfilled rentals: {}".format(rented))
-        self.logger.info("New state: {}".format(new_state))
         returns = [np.random.poisson(lam=lam) for lam in self.env_return_lam]
         new_state = np.minimum(new_state+returns, 
                                np.ones_like(returns)*self.max_nr_cars)
-        self.logger.info("Returns: {}".format(returns))
-        self.logger.info("New state: {}".format(new_state))
-        movement = [-action, action]  # +ve action sends cars from 1 --> 2
+        self.history.loc[self.step_nr, 'Close State'] = new_state
+        if action >= 0:  # +ve action sends cars from 1 --> 2
+            action_adj = min(action, new_state[0])
+        else: # -ve action sends cars from 2 --> 1
+            action_adj = max(action, -new_state[1])
+        movement = [-action_adj, action_adj]
         new_state = np.minimum(new_state+movement, 
                                np.ones_like(returns)*self.max_nr_cars)
-        self.logger.info("Movement: {}".format(movement))
-        self.logger.info("New state: {}".format(new_state))
         self.state = new_state
         reward = np.sum(rented)*self.rent_reward + abs(action)*self.move_reward
+        self.history.loc[self.step_nr, 'Requests'] = requests
+        self.history.loc[self.step_nr, 'Rented'] = rented
+        self.history.loc[self.step_nr, 'Returns'] = returns
+        self.history.loc[self.step_nr, 'Action'] = action
+        self.history.loc[self.step_nr, 'Movement'] = movement
+        self.history.loc[self.step_nr, 'Reward'] = reward
         # OpenAI gym terminology
         observation = self.state
         done = False
         info = None
         return observation, reward, done, info
     
-    def render(self):
-        return self.state
-        
-env = CarRentalEnv(verbose=2)
-    
-policy = np.zeros((MAX_NR_CARS, MAX_NR_CARS))
-value = np.zeros((MAX_NR_CARS, MAX_NR_CARS))
+    def render(self, full_history=True):
+        if full_history:
+            print(self.history)
+        else:
+            print(self.history.loc[self.step_nr])
 
-#for ii in range(MAX_EPOCHS):
     
+if __name__ == '__main__':
+    policy = np.zeros((MAX_NR_CARS, MAX_NR_CARS))
+    value = np.zeros((MAX_NR_CARS, MAX_NR_CARS))
+    env = CarRentalEnv()
+    env.render()
+    for ii in range(MAX_EPOCHS):
+        action = np.random.choice(env.action_space)
+        env.step(action)
+        env.render()
+        
