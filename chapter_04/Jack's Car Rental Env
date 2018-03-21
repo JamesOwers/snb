@@ -1,0 +1,12 @@
+INFO:Jack's Car Rental Env:Initialised Jack's Car Rental Env with params:
+INFO:Jack's Car Rental Env:Initialised Jack's Car Rental Env with params:
+INFO:Jack's Car Rental Env:Initialised Jack's Car Rental Env with params:
+INFO:Jack's Car Rental Env:Initialised Jack's Car Rental Env with params:
+INFO:Jack's Car Rental Env:Initialised Jack's Car Rental Env with params:
+INFO:root:Initialised Jack's Car Rental Env with params:
+INFO:root:Initialised Jack's Car Rental Env with params:
+INFO:Jack's Car Rental Env:Initialised Jack's Car Rental Env with params:
+INFO:Jack's Car Rental Env:Initialised Jack's Car Rental Env with params:
+INFO:Jack's Car Rental Env:Initialised Jack's Car Rental Env with params:
+INFO:Jack's Car Rental Env:Initialised Jack's Car Rental Env with params:
+['action_space', 'logger', 'max_nr_cars', 'move_reward', 'render', 'rent_reward', 'state', 'step']
