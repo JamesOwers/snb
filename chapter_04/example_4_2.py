@@ -80,11 +80,18 @@ def make_env_probs():
     for ss_0 in STATE_SPACE():
         print("p(s', r|s={}, a=...)".format(ss_0))
         for aa in ACTION_SPACE():
-            if any([ss_0[0]-aa < 0,  # sending more cars than avail in 1
-                    ss_0[0]+aa > MAX_NR_CARS,  # receiving more cars than space in 1
-                    ss_0[1]+aa < 0,  # sending more cars than avail in 2
-                    ss_0[1]-aa > MAX_NR_CARS]):  # receiving more cars than space in 2
-                    continue  # assign no probability to this ss_0, a combination
+            if aa > 0:  # aa +ve means 0 --> 1
+                if any([# sending more cars than avail in 1
+                        ss_0[0]-aa < 0,
+                        # receiving more cars than space in 2
+                        ss_0[1]+aa > MAX_NR_CARS]):
+                    continue
+            else:  # aa -ve means 1 --> 0
+                if any([# receiving more cars than space in 1
+                        ss_0[0]-aa > MAX_NR_CARS,
+                        # sending more cars than avail in 2
+                        ss_0[1]+aa < 0]):
+                    continue
             ss_action = (ss_0[0]-aa, ss_0[1]+aa)
             for rented0, rented1 in product(range(ss_action[0]+1), 
                             range(ss_action[1]+1)):
@@ -100,22 +107,22 @@ def make_env_probs():
                     rent1_prob = quick_poisson_pmf(rented1, lam1)
                 rent_prob = rent0_prob * rent1_prob
                 ss_rent = (ss_rent[0]-rented0, ss_rent[1]-rented1)
-            for returned0, returned1 in product(range(MAX_NR_CARS-ss_rent[0]+1), 
-                                range(MAX_NR_CARS-ss_rent[1]+1)):
-                ss_retn = ss_rent
-                lam0, lam1 = RETURN_LAM
-                if returned0 == MAX_NR_CARS-ss_retn[0]:
-                    retn0_prob = 1 - quick_poisson_cdf(returned0 - 1, lam0)
-                else:
-                    retn0_prob = quick_poisson_pmf(returned0, lam0)
-                if returned1 == MAX_NR_CARS-ss_retn[1]:
-                    retn1_prob = 1 - quick_poisson_cdf(returned1 - 1, lam1)
-                else:
-                    retn1_prob = quick_poisson_pmf(returned1, lam1)
-                retn_prob = retn0_prob * retn1_prob
-                ss_1 = (ss_retn[0]+returned0, ss_retn[1]+returned1)
                 reward = (rented0+rented1)*RENT_REWARD + abs(aa)*MOVE_REWARD
-                prob[(ss_1, reward, ss_0, aa)] += rent_prob * retn_prob
+                for returned0, returned1 in product(range(MAX_NR_CARS-ss_rent[0]+1), 
+                                    range(MAX_NR_CARS-ss_rent[1]+1)):
+                    ss_retn = ss_rent
+                    lam0, lam1 = RETURN_LAM
+                    if returned0 == MAX_NR_CARS-ss_retn[0]:
+                        retn0_prob = 1 - quick_poisson_cdf(returned0 - 1, lam0)
+                    else:
+                        retn0_prob = quick_poisson_pmf(returned0, lam0)
+                    if returned1 == MAX_NR_CARS-ss_retn[1]:
+                        retn1_prob = 1 - quick_poisson_cdf(returned1 - 1, lam1)
+                    else:
+                        retn1_prob = quick_poisson_pmf(returned1, lam1)
+                    retn_prob = retn0_prob * retn1_prob
+                    ss_1 = (ss_retn[0]+returned0, ss_retn[1]+returned1)
+                    prob[(ss_1, reward, ss_0, aa)] += rent_prob * retn_prob
 
     with open('{}/chapter_04/prob.pkl'.format(PROJECT_HOME), 'wb') as f:
         pickle.dump(prob, f)
@@ -123,6 +130,18 @@ def make_env_probs():
 if not os.path.exists('{}/chapter_04/prob.pkl'.format(PROJECT_HOME)):
     make_env_probs()
 
+CHECK_PROBS = True
+if CHECK_PROBS:
+    import pandas as pd
+    prob = pickle.load(open('{}/chapter_04/prob.pkl'.format(PROJECT_HOME), 'rb'))
+    prob = pd.Series(prob)
+    prob.name = "p(s', r|s, a)"
+    prob.index.names = ["s'", 'r', 's', 'a']
+#    prob.sort_index(level=["s", 'a', "s'", 'r'])
+#    prob.groupby(level=['s', 'a']).sum().plot('hist')
+    grp_sum = prob.groupby(level=['s', 'a']).sum().sort_index(level=['s', 'a'])
+    tol = 1e-9
+    assert(grp_sum[grp_sum < 1.-tol].shape[0] == 0)
 #prob_df = pd.DataFrame(prob)
 
 
