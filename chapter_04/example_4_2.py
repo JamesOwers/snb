@@ -54,27 +54,54 @@ GAMMA = 0.9
 CHECK_PROBS = True
 REQUEST_LAM = (3, 4)
 RETURN_LAM = (3, 2)
+ASSUME_CONSTANT_RETURNS = False
 
 poisson_pmf_dict = dict()
 poisson_cdf_dict = dict()
 
 def make_env_probs():
-    # TODO: Probably better to work in log space for small probabilities
-    # Getting poisson probabilities is a big overhead - create a lookup table
+    r"""
+    Function to create a dictionary of all the required probabilities:
+        .. math::
+            p(s', r|s, a)
+            
+    It loops through all s and a, then gets the probability of all possible
+    hire requests and returns, and finally gets the reward and end state (s')
+    for that combination of returns/hires and adds to the dictionary.
     
+    Will save the dictionary as a pickle file. The main call of this script
+    wont run this function if the pickled dictionary already exits.
+    
+    *N.B. For speed, it was chosen to assign zero probability to actions that
+    would use more cars that available, or that would overfill one of the 
+    depots.*
+    
+    Parameters
+    ----------
+    None
+    
+    Returns
+    -------
+    dict
+        The dictionary object containing the probability for all (s', r, s, a)
+        combinations
+    """
+    # TODO: Probably better to work in log space for small probabilities
+    
+    # Getting poisson probabilities is a big overhead - create a lookup table
     def quick_poisson_pmf(n, lam):
-            global poisson_pmf_dict
-            key = (n, lam)
-            if key not in poisson_pmf_dict:
-                poisson_pmf_dict[key] = poisson.pmf(n, lam)
-            return poisson_pmf_dict[key]    
+        global poisson_pmf_dict
+        key = (n, lam)
+        if key not in poisson_pmf_dict:
+            poisson_pmf_dict[key] = poisson.pmf(n, lam)
+        return poisson_pmf_dict[key]    
     
     def quick_poisson_cdf(n, lam):
-            global poisson_cdf_dict
-            key = (n, lam)
-            if key not in poisson_cdf_dict:
-                poisson_cdf_dict[key] = poisson.cdf(n, lam)
-            return poisson_cdf_dict[key] 
+        global poisson_cdf_dict
+        key = (n, lam)
+        if key not in poisson_cdf_dict:
+            poisson_cdf_dict[key] = poisson.cdf(n, lam)
+        return poisson_cdf_dict[key] 
 
     # construct the transition probabilities of the environment
     prob = defaultdict(int)
@@ -125,31 +152,72 @@ def make_env_probs():
                     retn_prob = retn0_prob * retn1_prob
                     ss_1 = (ss_retn[0]+returned0, ss_retn[1]+returned1)
                     prob[(ss_1, reward, ss_0, aa)] += rent_prob * retn_prob
-
     with open('{}/chapter_04/prob_{}.pkl'.format(PROJECT_HOME,
               MAX_NR_CARS), 'wb') as f:
         pickle.dump(prob, f)
-    
     return prob
 
-def expected_update(series, value, discount):
-    idx = [ii for ii in zip(*series.index.get_level_values("s'").values)]
-    rtn = (series.values * (series.index.get_level_values("r").values + 
-                            discount * value[idx[0], idx[1]]))
-    return rtn.sum()
 
-
-def evaluate_policy(policy, value, prob, discount, tol=1e-9):
-    """
-    Performs an iterative policy evaluation. Stops when the maximum value 
-    difference for a given iteration is less than tol.
+def expected_update(prob, value, discount):
+    r"""
+    Calculates the expected update for a given state:
+        .. math::
+            \sum_{s', r} p(s', r|s, a)[r + \gamma V(s')]
     
-    Arguments
-    ---------
-    policy : numpy array returning action for a given state tuple
-    value : numpy array returning the value of a state given a state tuple
-    prob : pandas series object with index s', r, s, a returning p(s',r|s,a)
-    discount : the discount factor to apply when getting the expected update
+    Parameters
+    ----------
+    prob: pandas.Series object
+        :math:`p(s', r|s, a)` - A series object containing the probabilites
+        for all the s', and r to sum over. *Must contain index levels named s' 
+        and r.*
+    
+    value: numpy.ndarray
+        :math:`V(s)` - The array which contains the current values for all states s
+    
+    discount: float
+        :math:`\gamma` - The discount factor to use within the calculation
+    
+    Returns
+    -------
+    float
+        The value of the sum
+    
+    """
+    idx = [ii for ii in zip(*prob.index.get_level_values("s'").values)]
+    rtn = (prob.values * (prob.index.get_level_values("r").values + 
+                            discount * value[idx[0], idx[1]])).sum()
+    return rtn
+
+
+def evaluate_policy(policy, value, prob, discount, tol=1e-4):
+    r"""
+    Performs an iterative policy evaluation. Stops when the difference between
+    the value before and after the iteration is less than `tol` (for the state
+    that maximises the difference).
+    
+    :math:`V_{n+1}(s) = \sum_{s', r} p(s', r|s, a)[r + \gamma V_{n}(s')]`
+    
+    Parameters
+    ----------
+    policy: numpy.ndarray
+        :math:`\pi(s)` - the policy to be evaluated. Returns an action for a 
+        given state tuple
+    value: numpy.ndarray
+        :math:`V_{0}(s)` - The initial value of all states.
+    prob: pandas.Series
+        :math:`p(s', r|s, a)` - probabilites containing index with names
+        s', r, s, and a
+    discount: float
+        :math:`\gamma` the discount factor to apply when getting the expected 
+        update.
+    tol: float
+        The minimum difference in value to observe before stopping the 
+        iteration.
+    
+    Returns
+    -------
+    value: numpy.ndarray
+        :math:`V_{N}(s)` - The updated value of all states under the given policy
     """
     max_diff = np.inf
     while max_diff > tol:
@@ -165,6 +233,26 @@ def evaluate_policy(policy, value, prob, discount, tol=1e-9):
 
 
 def improve_policy(policy, value, prob, discount):
+    r"""
+    Performs greedy policy improvement for a given value function:
+    
+    .. math::
+        \pi_{n+1}(s) = \text{argmax}_a  \sum_{s', r} p(s', r|s, a)[r + 
+        \gamma V_{\pi_n}(s')]
+    
+    Parameters
+    ----------
+    policy: numpy.ndarray
+        :math:`\pi(s)` - returns an action for a given state tuple
+    value: numpy.ndarray
+        :math:`V(s)` - returns the value of a state given a state tuple
+    prob: pandas.Series
+        :math:`p(s', r|s, a)` - probabilites containing index with names
+        s', r, s, and a
+    discount: float
+        :math:`\gamma` - the discount factor to apply when getting the expected 
+        update :math:`\sum_{s', r} p(s', r|s, a)[r + \gamma V(s')]`
+    """
     policy_stable = True
     old_policy = policy.copy()
     for s in STATE_SPACE():
@@ -182,6 +270,21 @@ def improve_policy(policy, value, prob, discount):
 
 
 def plot_iteration(policy, value):
+    r"""
+    Convenience function to perform plotting of the policy and value functions.
+    Creates a single figure with two heatmap subplots.
+    
+    Parameters
+    ----------
+    policy: numpy.ndarray
+        Policy array
+    value: numpy.ndarray
+        Value array
+    
+    Returns
+    -------
+    None
+    """
     fig, ax = plt.subplots(1, 2, figsize=(8, 4))
     sns.heatmap(value, annot=False, fmt='.0f', ax=ax[0]).invert_yaxis()
     ax[0].set_ylabel('Depot 1')
@@ -216,14 +319,19 @@ if __name__ == '__main__':
     
     if CHECK_PROBS:
         print('Checking probabilities sum to 1')
-#        prob = pickle.load(open('{}/chapter_04/prob_20.pkl'.format(PROJECT_HOME), 'rb'))
-    #    prob.sort_index(level=["s", 'a', "s'", 'r'])
-    #    prob.groupby(level=['s', 'a']).sum().plot('hist')
         grp_sum = prob.groupby(level=['s', 'a']).sum().sort_index(level=['s', 'a'])
         tol = 1e-12
         assert(grp_sum[grp_sum < 1.-tol].shape[0] == 0), "...They don't"
         print('Test passed')
-    #    pd.DataFrame(prob).query('s == tuple((0, 4))')
+#        # Some functions for debugging:
+#        prob.sort_index(level=["s", 'a', "s'", 'r'])
+#        prob.groupby(level=['s', 'a']).sum().plot('hist')
+#        pd.DataFrame(prob).query('s == tuple((0, 4))')
+    
+    if ASSUME_CONSTANT_RETURNS:
+        # TODO: sum up probabilites to reduce computation time. This assumption
+        #       is used in the given solutions.
+        pass
     
     policy = np.zeros((MAX_NR_CARS+1, MAX_NR_CARS+1), dtype=int)
     value = np.zeros((MAX_NR_CARS+1, MAX_NR_CARS+1), dtype=float)
