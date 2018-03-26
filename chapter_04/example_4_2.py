@@ -30,6 +30,7 @@ Design decisions:
 """
 
 import os
+import sys
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
@@ -43,7 +44,7 @@ PROJECT_HOME = '/home/james/git/snb'
 FIGURE_OUT = '{}/chapter_04/figures'.format(PROJECT_HOME)
 assert os.path.exists(PROJECT_HOME), 'Set PROJECT_HOME (=[{}]) in this file'.\
                                      format(PROJECT_HOME)
-MAX_NR_CARS = 10
+                                     
 ACTION_SPACE = lambda: range(-5, 6)
 STATE_SPACE = lambda: product(range(MAX_NR_CARS+1), range(MAX_NR_CARS+1))
 MAX_EPOCHS = 10
@@ -182,7 +183,7 @@ def improve_policy(policy, value, prob, discount):
 
 def plot_iteration(policy, value):
     fig, ax = plt.subplots(1, 2, figsize=(8, 4))
-    sns.heatmap(value, annot=True, fmt='.0f', ax=ax[0]).invert_yaxis()
+    sns.heatmap(value, annot=False, fmt='.0f', ax=ax[0]).invert_yaxis()
     ax[0].set_ylabel('Depot 1')
     ax[0].set_xlabel('Depot 2')
     ax[0].set_title('Value')
@@ -195,6 +196,7 @@ def plot_iteration(policy, value):
     
 
 if __name__ == '__main__':
+    MAX_NR_CARS = int(sys.argv[-1])
     print("Running Jack's cars experiment with max_cars = {}".format(
             MAX_NR_CARS))
     if not os.path.exists('{}/chapter_04/prob_{}.pkl'.format(PROJECT_HOME,
