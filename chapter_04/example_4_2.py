@@ -39,8 +39,9 @@ from collections import defaultdict
 from itertools import product
 
 PROJECT_HOME = '/home/james/git/snb'
-assert os.path.exists(PROJECT_HOME), 'Reset PROJECT_HOME (=[{}])'.format(PROJECT_HOME)
-MAX_NR_CARS = 20
+assert os.path.exists(PROJECT_HOME), 'Set PROJECT_HOME (=[{}]) in this file'.\
+                                     format(PROJECT_HOME)
+MAX_NR_CARS = 5
 ACTION_SPACE = lambda: range(-5, 6)
 STATE_SPACE = lambda: product(range(MAX_NR_CARS+1), range(MAX_NR_CARS+1))
 MAX_EPOCHS = 10
@@ -50,56 +51,57 @@ MOVE_REWARD = -2
 policy = np.zeros((MAX_NR_CARS, MAX_NR_CARS))
 value = np.zeros((MAX_NR_CARS, MAX_NR_CARS))
 
-#REQUEST_DIST = (poisson(3), poisson(4))
-#RETURN_DIST = (poisson(3), poisson(2))
-# Getting poisson probabilities is a big overhead - create a lookup table
 poisson_pmf_dict = dict()
-def quick_poisson_pmf(n, lam):
-    global poisson_pmf_dict
-    key = (n, lam)
-    if key not in poisson_pmf_dict:
-        poisson_pmf_dict[key] = poisson.pmf(n, lam)
-    return poisson_pmf_dict[key]    
-        
 poisson_cdf_dict = dict()
-def quick_poisson_cdf(n, lam):
-    global poisson_cdf_dict
-    key = (n, lam)
-    if key not in poisson_cdf_dict:
-        poisson_cdf_dict[key] = poisson.cdf(n, lam)
-    return poisson_cdf_dict[key] 
-        
-REQUEST_LAM = (3, 4)
-RETURN_LAM = (3, 2)
 
-# construct the transition probabilities of the environment
-prob = defaultdict(int)
-# ss = state_before = (nr_cars depot 1, nr_cars depot 2)
-for ss_0 in STATE_SPACE():
-    print("p(s', r|s={}, a=...)".format(ss_0))
-    for aa in ACTION_SPACE():
-        if any([ss_0[0]-aa < 0,  # sending more cars than avail in 1
-                ss_0[0]+aa > MAX_NR_CARS,  # receiving more cars than space in 1
-                ss_0[1]+aa < 0,  # sending more cars than avail in 2
-                ss_0[1]-aa > MAX_NR_CARS]):  # receiving more cars than space in 2
-            continue  # assign no probability to this ss_0, a combination
-        ss_action = (ss_0[0]-aa, ss_0[1]+aa)
-        for rented0, rented1 in product(range(ss_action[0]+1), 
-                                        range(ss_action[1]+1)):
-            ss_rent = ss_action
-            lam0, lam1 = REQUEST_LAM
-            if rented0 == ss_rent[0]:  # i.e. requests for all the cars (or more)
-                rent0_prob = 1 - quick_poisson_cdf(rented0 - 1, lam0)  # remaining mass
-            else:
-                rent0_prob = quick_poisson_pmf(rented0, lam0)
-            if rented1 == ss_rent[1]:  # i.e. requests for all the cars (or more)
-                rent1_prob = 1 - quick_poisson_cdf(rented1 - 1, lam1)  # remaining mass
-            else:
-                rent1_prob = quick_poisson_pmf(rented1, lam1)
-            rent_prob = rent0_prob * rent1_prob
-            ss_rent = (ss_rent[0]-rented0, ss_rent[1]-rented1)
+def make_env_probs():
+    # Getting poisson probabilities is a big overhead - create a lookup table
+    
+    def quick_poisson_pmf(n, lam):
+            global poisson_pmf_dict
+            key = (n, lam)
+            if key not in poisson_pmf_dict:
+                poisson_pmf_dict[key] = poisson.pmf(n, lam)
+            return poisson_pmf_dict[key]    
+    
+    def quick_poisson_cdf(n, lam):
+            global poisson_cdf_dict
+            key = (n, lam)
+            if key not in poisson_cdf_dict:
+                poisson_cdf_dict[key] = poisson.cdf(n, lam)
+            return poisson_cdf_dict[key] 
+        
+    REQUEST_LAM = (3, 4)
+    RETURN_LAM = (3, 2)
+
+    # construct the transition probabilities of the environment
+    prob = defaultdict(int)
+    # ss = state_before = (nr_cars depot 1, nr_cars depot 2)
+    for ss_0 in STATE_SPACE():
+        print("p(s', r|s={}, a=...)".format(ss_0))
+        for aa in ACTION_SPACE():
+            if any([ss_0[0]-aa < 0,  # sending more cars than avail in 1
+                    ss_0[0]+aa > MAX_NR_CARS,  # receiving more cars than space in 1
+                    ss_0[1]+aa < 0,  # sending more cars than avail in 2
+                    ss_0[1]-aa > MAX_NR_CARS]):  # receiving more cars than space in 2
+                    continue  # assign no probability to this ss_0, a combination
+            ss_action = (ss_0[0]-aa, ss_0[1]+aa)
+            for rented0, rented1 in product(range(ss_action[0]+1), 
+                            range(ss_action[1]+1)):
+                ss_rent = ss_action
+                lam0, lam1 = REQUEST_LAM
+                if rented0 == ss_rent[0]:  # i.e. requests for all the cars (or more)
+                    rent0_prob = 1 - quick_poisson_cdf(rented0 - 1, lam0)  # remaining mass
+                else:
+                    rent0_prob = quick_poisson_pmf(rented0, lam0)
+                if rented1 == ss_rent[1]:  # i.e. requests for all the cars (or more)
+                    rent1_prob = 1 - quick_poisson_cdf(rented1 - 1, lam1)  # remaining mass
+                else:
+                    rent1_prob = quick_poisson_pmf(rented1, lam1)
+                rent_prob = rent0_prob * rent1_prob
+                ss_rent = (ss_rent[0]-rented0, ss_rent[1]-rented1)
             for returned0, returned1 in product(range(MAX_NR_CARS-ss_rent[0]+1), 
-                                                range(MAX_NR_CARS-ss_rent[1]+1)):
+                                range(MAX_NR_CARS-ss_rent[1]+1)):
                 ss_retn = ss_rent
                 lam0, lam1 = RETURN_LAM
                 if returned0 == MAX_NR_CARS-ss_retn[0]:
@@ -115,10 +117,11 @@ for ss_0 in STATE_SPACE():
                 reward = (rented0+rented1)*RENT_REWARD + abs(aa)*MOVE_REWARD
                 prob[(ss_1, reward, ss_0, aa)] += rent_prob * retn_prob
 
-print(len(prob))
-with open('{}/chapter_04/prob.pkl'.format(PROJECT_HOME), 'wb') as f:
-    pickle.dump(prob, f)
+    with open('{}/chapter_04/prob.pkl'.format(PROJECT_HOME), 'wb') as f:
+        pickle.dump(prob, f)
 
+if not os.path.exists('{}/chapter_04/prob.pkl'.format(PROJECT_HOME)):
+    make_env_probs()
 
 #prob_df = pd.DataFrame(prob)
 
