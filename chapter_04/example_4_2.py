@@ -30,31 +30,35 @@ Design decisions:
 """
 
 import os
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
+import seaborn as sns
 import numpy as np
+import pandas as pd
 import pickle
-#import pandas as pd
 from scipy.stats import poisson
 from collections import defaultdict
 from itertools import product
 
 PROJECT_HOME = '/home/james/git/snb'
+FIGURE_OUT = '{}/chapter_04'.format(PROJECT_HOME)
 assert os.path.exists(PROJECT_HOME), 'Set PROJECT_HOME (=[{}]) in this file'.\
                                      format(PROJECT_HOME)
-MAX_NR_CARS = 5
+MAX_NR_CARS = 20
 ACTION_SPACE = lambda: range(-5, 6)
 STATE_SPACE = lambda: product(range(MAX_NR_CARS+1), range(MAX_NR_CARS+1))
 MAX_EPOCHS = 10
 RENT_REWARD = 10
 MOVE_REWARD = -2
-
-policy = np.zeros((MAX_NR_CARS, MAX_NR_CARS))
-value = np.zeros((MAX_NR_CARS, MAX_NR_CARS))
+GAMMA = 0.9
+CHECK_PROBS = True
+REQUEST_LAM = (3, 4)
+RETURN_LAM = (3, 2)
 
 poisson_pmf_dict = dict()
 poisson_cdf_dict = dict()
 
 def make_env_probs():
+    # TODO: Probably better to work in log space for small probabilities
     # Getting poisson probabilities is a big overhead - create a lookup table
     
     def quick_poisson_pmf(n, lam):
@@ -70,9 +74,6 @@ def make_env_probs():
             if key not in poisson_cdf_dict:
                 poisson_cdf_dict[key] = poisson.cdf(n, lam)
             return poisson_cdf_dict[key] 
-        
-    REQUEST_LAM = (3, 4)
-    RETURN_LAM = (3, 2)
 
     # construct the transition probabilities of the environment
     prob = defaultdict(int)
@@ -124,34 +125,153 @@ def make_env_probs():
                     ss_1 = (ss_retn[0]+returned0, ss_retn[1]+returned1)
                     prob[(ss_1, reward, ss_0, aa)] += rent_prob * retn_prob
 
-    with open('{}/chapter_04/prob.pkl'.format(PROJECT_HOME), 'wb') as f:
+    with open('{}/chapter_04/prob_{}.pkl'.format(PROJECT_HOME,
+              MAX_NR_CARS), 'wb') as f:
         pickle.dump(prob, f)
+    
+    return prob
 
-if not os.path.exists('{}/chapter_04/prob.pkl'.format(PROJECT_HOME)):
-    make_env_probs()
 
-CHECK_PROBS = True
-if CHECK_PROBS:
-    import pandas as pd
-    prob = pickle.load(open('{}/chapter_04/prob.pkl'.format(PROJECT_HOME), 'rb'))
+def evaluate_policy(policy, value, prob, discount, tol=1e-9):
+    """
+    Performs an iterative policy evaluation. Stops when the maximum value 
+    difference for a given iteration is less than tol.
+    
+    Arguments
+    ---------
+    policy : numpy array returning action for a given state tuple
+    value : numpy array returning the value of a state given a state tuple
+    prob : pandas series object with index s', r, s, a returning p(s',r|s,a)
+    discount : the discount factor to apply when getting the expected update
+    """
+    states = prob.index.levels[prob.index.names.index('s')]
+    max_diff = np.inf
+    while max_diff > tol:
+        max_diff = 0
+        init_value = value.copy()
+        for s in states:
+            a = policy[s]
+            probs_gvn_sa = prob[:, :, s, a].reset_index()
+            df = probs_gvn_sa
+            idx = [ii for ii in zip(*df["s'"].values)]
+            rtn = (df["p(s', r|s, a)"] * (df['r'] + 
+                                          discount*value[idx[0], idx[1]]))
+            value[s] = np.sum(rtn)
+            diff = abs(init_value[s] - value[s])
+            max_diff = max(diff, max_diff)
+    return value
+
+
+def improve_policy(policy, value, prob, discount):
+    policy_stable = True
+    states = prob.index.levels[prob.index.names.index('s')]
+    old_policy = policy.copy()
+    for s in states:
+        old_action = old_policy[s]
+        probs_gvn_s = prob[:, :, s, :].reset_index()
+        df = probs_gvn_s
+        action_value = dict()
+        for a, df_a in df.groupby('a'):
+            idx = [ii for ii in zip(*df_a["s'"].values)]
+            rtn = (df_a["p(s', r|s, a)"] * (df_a['r'] + 
+                                          discount*value[idx[0], idx[1]]))
+            action_value[a] = np.sum(rtn)
+        # N.B. idxmin returns the first occurance, the sort_index() ensures
+        # that ties are broken by selecting the minimum action (i.e. most -ve)
+        policy[s] = pd.Series(action_value).sort_index().idxmin()
+        if policy_stable:
+            policy_stable = policy[s] == old_action
+    return policy, policy_stable
+
+
+def plot_iteration(policy, value):
+    fig, ax = plt.subplots(1, 2, figsize=(8, 4))
+    sns.heatmap(value, annot=True, fmt='.0f', ax=ax[0]).invert_yaxis()
+    ax[0].set_ylabel('Depot 1')
+    ax[0].set_xlabel('Depot 2')
+    ax[0].set_title('Value')
+    action_space = list(ACTION_SPACE())
+    sns.heatmap(policy, annot=True, fmt='.0f', ax=ax[1], 
+                vmin=action_space[0], vmax=action_space[-1]).invert_yaxis()
+    ax[1].set_title('Policy')
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.85)
+    
+
+if __name__ == '__main__':
+    if not os.path.exists('{}/chapter_04/prob_{}.pkl'.format(PROJECT_HOME,
+                          MAX_NR_CARS)):
+        print('Making environment transition probabilities')
+        prob = make_env_probs()
+    else:
+        prob = pickle.load(open('{}/chapter_04/prob_{}.pkl'.
+                                format(PROJECT_HOME, MAX_NR_CARS), 'rb'))
+        
+    # Make Panda-y - very useful for iterating over states as index levels
+    # are stored. See evaluate_policy and improve_policy for examples
     prob = pd.Series(prob)
     prob.name = "p(s', r|s, a)"
     prob.index.names = ["s'", 'r', 's', 'a']
-#    prob.sort_index(level=["s", 'a', "s'", 'r'])
-#    prob.groupby(level=['s', 'a']).sum().plot('hist')
-    grp_sum = prob.groupby(level=['s', 'a']).sum().sort_index(level=['s', 'a'])
-    tol = 1e-9
-    assert(grp_sum[grp_sum < 1.-tol].shape[0] == 0)
-#prob_df = pd.DataFrame(prob)
-
-
-#fig, ax = plt.subplots(1,1)
-#mu = 10
-#x = np.arange(poisson.ppf(0.01, mu),
-#              poisson.ppf(0.99, mu))
-#ax.plot(x, poisson.pmf(x, mu), 'bo', ms=8, label='poisson pmf')
-#ax.vlines(x, 0, poisson.pmf(x, mu), colors='b', lw=5, alpha=0.5)
-
-# Evaluate
-
-# Improve
+    
+    if CHECK_PROBS:
+        print('Checking probabilities sum to 1')
+#        prob = pickle.load(open('{}/chapter_04/prob_20.pkl'.format(PROJECT_HOME), 'rb'))
+    #    prob.sort_index(level=["s", 'a', "s'", 'r'])
+    #    prob.groupby(level=['s', 'a']).sum().plot('hist')
+        grp_sum = prob.groupby(level=['s', 'a']).sum().sort_index(level=['s', 'a'])
+        tol = 1e-12
+        assert(grp_sum[grp_sum < 1.-tol].shape[0] == 0), "...They don't"
+        print('Test passed')
+    #    pd.DataFrame(prob).query('s == tuple((0, 4))')
+    
+    policy = np.zeros((MAX_NR_CARS+1, MAX_NR_CARS+1), dtype=int)
+    value = np.zeros((MAX_NR_CARS+1, MAX_NR_CARS+1), dtype=float)
+    ii = 0
+    plot_iteration(policy, value)
+    plt.suptitle('Iteration {}'.format(ii))
+    plt.savefig('{}/{}__iteration_{}.pdf'.format(
+                FIGURE_OUT, MAX_NR_CARS, ii), dpi=300)
+    policy_stable = False
+    while not policy_stable:
+        ii += 1
+        print('Iteration {}'.format(ii))
+        print('Evaluating Policy')
+        value = evaluate_policy(policy, value, prob, GAMMA)
+        print('Improving Policy')
+        policy, policy_stable = improve_policy(policy, value, prob, GAMMA)
+        plot_iteration(policy, value)
+        plt.suptitle('Iteration {}'.format(ii))
+        plt.savefig('{}/{}__iteration_{}.pdf'.format(
+                FIGURE_OUT, MAX_NR_CARS, ii), dpi=300)
+    print('Policy stable')
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
