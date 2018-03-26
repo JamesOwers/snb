@@ -43,7 +43,7 @@ PROJECT_HOME = '/home/james/git/snb'
 FIGURE_OUT = '{}/chapter_04'.format(PROJECT_HOME)
 assert os.path.exists(PROJECT_HOME), 'Set PROJECT_HOME (=[{}]) in this file'.\
                                      format(PROJECT_HOME)
-MAX_NR_CARS = 10
+MAX_NR_CARS = 20
 ACTION_SPACE = lambda: range(-5, 6)
 STATE_SPACE = lambda: product(range(MAX_NR_CARS+1), range(MAX_NR_CARS+1))
 MAX_EPOCHS = 10
@@ -199,11 +199,14 @@ def plot_iteration(policy, value):
     
 
 if __name__ == '__main__':
+    print("Running Jack's cars experiment with max_cars = {}".format(
+            MAX_NR_CARS))
     if not os.path.exists('{}/chapter_04/prob_{}.pkl'.format(PROJECT_HOME,
                           MAX_NR_CARS)):
         print('Making environment transition probabilities')
         prob = make_env_probs()
     else:
+        print('Loading environment transition probabilities from file')
         prob = pickle.load(open('{}/chapter_04/prob_{}.pkl'.
                                 format(PROJECT_HOME, MAX_NR_CARS), 'rb'))
         
