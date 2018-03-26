@@ -40,10 +40,10 @@ from collections import defaultdict
 from itertools import product
 
 PROJECT_HOME = '/home/james/git/snb'
-FIGURE_OUT = '{}/chapter_04'.format(PROJECT_HOME)
+FIGURE_OUT = '{}/chapter_04/figures'.format(PROJECT_HOME)
 assert os.path.exists(PROJECT_HOME), 'Set PROJECT_HOME (=[{}]) in this file'.\
                                      format(PROJECT_HOME)
-MAX_NR_CARS = 20
+MAX_NR_CARS = 10
 ACTION_SPACE = lambda: range(-5, 6)
 STATE_SPACE = lambda: product(range(MAX_NR_CARS+1), range(MAX_NR_CARS+1))
 MAX_EPOCHS = 10
@@ -131,6 +131,12 @@ def make_env_probs():
     
     return prob
 
+def expected_update(series, value, discount):
+    idx = [ii for ii in zip(*series.index.get_level_values("s'").values)]
+    rtn = (series.values * (series.index.get_level_values("r").values + 
+                            discount * value[idx[0], idx[1]]))
+    return rtn.sum()
+
 
 def evaluate_policy(policy, value, prob, discount, tol=1e-9):
     """
@@ -144,19 +150,14 @@ def evaluate_policy(policy, value, prob, discount, tol=1e-9):
     prob : pandas series object with index s', r, s, a returning p(s',r|s,a)
     discount : the discount factor to apply when getting the expected update
     """
-    states = prob.index.levels[prob.index.names.index('s')]
     max_diff = np.inf
     while max_diff > tol:
         max_diff = 0
         init_value = value.copy()
-        for s in states:
+        for s in STATE_SPACE():
             a = policy[s]
-            probs_gvn_sa = prob[:, :, s, a].reset_index()
-            df = probs_gvn_sa
-            idx = [ii for ii in zip(*df["s'"].values)]
-            rtn = (df["p(s', r|s, a)"] * (df['r'] + 
-                                          discount*value[idx[0], idx[1]]))
-            value[s] = np.sum(rtn)
+            probs_gvn_sa = prob[:, :, s, a]
+            value[s] = expected_update(probs_gvn_sa, value, discount)
             diff = abs(init_value[s] - value[s])
             max_diff = max(diff, max_diff)
     return value
@@ -164,18 +165,13 @@ def evaluate_policy(policy, value, prob, discount, tol=1e-9):
 
 def improve_policy(policy, value, prob, discount):
     policy_stable = True
-    states = prob.index.levels[prob.index.names.index('s')]
     old_policy = policy.copy()
-    for s in states:
+    for s in STATE_SPACE():
         old_action = old_policy[s]
-        probs_gvn_s = prob[:, :, s, :].reset_index()
-        df = probs_gvn_s
+        probs_gvn_s = prob[:, :, s, :]
         action_value = dict()
-        for a, df_a in df.groupby('a'):
-            idx = [ii for ii in zip(*df_a["s'"].values)]
-            rtn = (df_a["p(s', r|s, a)"] * (df_a['r'] + 
-                                          discount*value[idx[0], idx[1]]))
-            action_value[a] = rtn.sum()
+        for a, probs_gvn_sa in probs_gvn_s.groupby('a'):
+            action_value[a] = expected_update(probs_gvn_sa, value, discount)
         # N.B. idxmin returns the first occurance, the sort_index() ensures
         # that ties are broken by selecting the minimum action (i.e. most -ve)
         policy[s] = pd.Series(action_value).sort_index().idxmax()
