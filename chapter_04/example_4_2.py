@@ -41,10 +41,12 @@ from collections import defaultdict
 from itertools import product
 
 PROJECT_HOME = '/home/james/git/snb'
-FIGURE_OUT = '{}/chapter_04/figures'.format(PROJECT_HOME)
 assert os.path.exists(PROJECT_HOME), 'Set PROJECT_HOME (=[{}]) in this file'.\
                                      format(PROJECT_HOME)
-                                     
+FIGURE_OUT = '{}/chapter_04/figures'.format(PROJECT_HOME)
+assert os.path.exists(FIGURE_OUT), 'Create a folder for figures: {}'.\
+                                     format(FIGURE_OUT)
+
 ACTION_SPACE = lambda: range(-5, 6)
 STATE_SPACE = lambda: product(range(MAX_NR_CARS+1), range(MAX_NR_CARS+1))
 MAX_EPOCHS = 10
@@ -56,8 +58,8 @@ REQUEST_LAM = (3, 4)
 RETURN_LAM = (3, 2)
 ASSUME_CONSTANT_RETURNS = False
 
-poisson_pmf_dict = dict()
-poisson_cdf_dict = dict()
+POISSON_PMF_DICT = dict()
+POISSON_CDF_DICT = dict()
 
 def make_env_probs():
     r"""
@@ -90,18 +92,18 @@ def make_env_probs():
     
     # Getting poisson probabilities is a big overhead - create a lookup table
     def quick_poisson_pmf(n, lam):
-        global poisson_pmf_dict
+        global POISSON_PMF_DICT
         key = (n, lam)
-        if key not in poisson_pmf_dict:
-            poisson_pmf_dict[key] = poisson.pmf(n, lam)
-        return poisson_pmf_dict[key]    
+        if key not in POISSON_PMF_DICT:
+            POISSON_PMF_DICT[key] = poisson.pmf(n, lam)
+        return POISSON_PMF_DICT[key]    
     
     def quick_poisson_cdf(n, lam):
-        global poisson_cdf_dict
+        global POISSON_CDF_DICT
         key = (n, lam)
-        if key not in poisson_cdf_dict:
-            poisson_cdf_dict[key] = poisson.cdf(n, lam)
-        return poisson_cdf_dict[key] 
+        if key not in POISSON_CDF_DICT:
+            POISSON_CDF_DICT[key] = poisson.cdf(n, lam)
+        return POISSON_CDF_DICT[key] 
 
     # construct the transition probabilities of the environment
     prob = defaultdict(int)
@@ -252,6 +254,13 @@ def improve_policy(policy, value, prob, discount):
     discount: float
         :math:`\gamma` - the discount factor to apply when getting the expected 
         update :math:`\sum_{s', r} p(s', r|s, a)[r + \gamma V(s')]`
+        
+    Returns
+    -------
+    policy: numpy.ndarray
+        the new policy
+    policy_stable: bool
+        whether there were any changes to the policy that was supplied
     """
     policy_stable = True
     old_policy = policy.copy()
