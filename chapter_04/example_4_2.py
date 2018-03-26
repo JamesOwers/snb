@@ -43,7 +43,7 @@ PROJECT_HOME = '/home/james/git/snb'
 FIGURE_OUT = '{}/chapter_04'.format(PROJECT_HOME)
 assert os.path.exists(PROJECT_HOME), 'Set PROJECT_HOME (=[{}]) in this file'.\
                                      format(PROJECT_HOME)
-MAX_NR_CARS = 20
+MAX_NR_CARS = 10
 ACTION_SPACE = lambda: range(-5, 6)
 STATE_SPACE = lambda: product(range(MAX_NR_CARS+1), range(MAX_NR_CARS+1))
 MAX_EPOCHS = 10
@@ -175,10 +175,10 @@ def improve_policy(policy, value, prob, discount):
             idx = [ii for ii in zip(*df_a["s'"].values)]
             rtn = (df_a["p(s', r|s, a)"] * (df_a['r'] + 
                                           discount*value[idx[0], idx[1]]))
-            action_value[a] = np.sum(rtn)
+            action_value[a] = rtn.sum()
         # N.B. idxmin returns the first occurance, the sort_index() ensures
         # that ties are broken by selecting the minimum action (i.e. most -ve)
-        policy[s] = pd.Series(action_value).sort_index().idxmin()
+        policy[s] = pd.Series(action_value).sort_index().idxmax()
         if policy_stable:
             policy_stable = policy[s] == old_action
     return policy, policy_stable
